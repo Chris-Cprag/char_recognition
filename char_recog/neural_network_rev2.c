@@ -15,23 +15,41 @@
 
 //(2 Hidden Layer) Neural Network Structure
 typedef struct {
-    double input_layer[n_inputs];                       //Activations
-    double hidden_layer_1[n_hidden_1];                  //,,,
-    double hidden_layer_2[n_hidden_2];                  //...
-    double output_layer[n_outputs];                     //...
+    double input_layer[n_inputs];                            //Activations
+    double hidden_layer_1[n_hidden_1];                       //,,,
+    double hidden_layer_2[n_hidden_2];                       //...
+    double output_layer[n_outputs];                          //...
     
-    double hidden_layer_1_bias[n_hidden_1];             //Bias
-    double hidden_layer_2_bias[n_hidden_2];             //...
-    double output_layer_bias[n_outputs];                //...
+    double hidden_layer_1_bias[n_hidden_1];                  //Bias
+    double hidden_layer_2_bias[n_hidden_2];                  //...
+    double output_layer_bias[n_outputs];                     //...
     
-    double hidden_weights_1[n_inputs][n_hidden_1];      //Weights
-    double hidden_weights_2[n_hidden_1][n_hidden_2];    //...
-    double output_weights[n_hidden_2][n_outputs];       //...
+    double hidden_weights_1[n_inputs][n_hidden_1];           //Weights
+    double hidden_weights_2[n_hidden_1][n_hidden_2];         //...
+    double output_weights[n_hidden_2][n_outputs];            //...
 } Neural_Network;
+
+typedef struct {
+    double hidden_weights_1_grad[n_inputs][n_hidden_1];      //Weights Gradients
+    double hidden_weights_2_grad[n_hidden_1][n_hidden_2];    //...
+    double output_weights_grad[n_hidden_2][n_outputs];       //...
+
+    double hidden_layer_1_bias_grad[n_hidden_1];             //Bias Gradients
+    double hidden_layer_2_bias_grad[n_hidden_2];             //...
+    double output_layer_bias_grad[n_outputs];                //...
+
+    double softmax_Outputs[n_outputs];                       //Stored Softmax Outputs
+} label_Grad;
 
 //Global Initalization
 Neural_Network N_Network;
+label_Grad speculative_Label_Array[n_outputs];
+int set_Grad[n_outputs] = {0};
+
+//Settings
 char activation_Type = 'R';                              //Activation Type: S for Sigmoid, R for ReLu, L for Leaky ReLu
+char speculative_Backpropagation = 'Y';                  //Speculative Backpropagation? Y for Yes, N for No
+float threshold = 0.25;
 
 //-------------------------------------------------------
 //Activation Functions
@@ -284,7 +302,7 @@ void feed_Forward(){
 
 }
 
-void backpropagation(double desired[])
+void backpropagation(double desired[],int label)
 {
   //Calculating Error Deltas
   //Gives you the Output Error Delta
@@ -331,25 +349,70 @@ void backpropagation(double desired[])
   //Adjusts the Hidden_2-Output Weights and Bias
   for (int i = 0; i<n_outputs;i++){
     N_Network.output_layer_bias[i] += o_error[i]*learning_rate;
+    if(speculative_Backpropagation == 'Y'){
+      speculative_Label_Array[label].output_layer_bias_grad[i] = o_error[i]*learning_rate;//Saves Out Bias for Speculation
+    }
     for (int j = 0; j<n_hidden_2;j++){
       N_Network.output_weights[j][i] += learning_rate*o_error[i]*N_Network.hidden_layer_2[j];
+      if(speculative_Backpropagation == 'Y'){
+        speculative_Label_Array[label].output_weights_grad[j][i] = learning_rate*o_error[i]*N_Network.hidden_layer_2[j]; //Saves Out Weights for Speculation
+      }
     }
   }
   //Adjusts the Hidden_1-Hidden_2 Weights and Bias
   for (int i = 0; i<n_hidden_2;i++){
     N_Network.hidden_layer_2_bias[i] += H2_error[i]*learning_rate;
+    if(speculative_Backpropagation == 'Y'){
+      speculative_Label_Array[label].hidden_layer_2_bias_grad[i] = H2_error[i]*learning_rate; //Saves H2 Bias for Speculation
+    }
     for (int j = 0; j<n_hidden_1;j++){
       N_Network.hidden_weights_2[j][i] += learning_rate*H2_error[i]*N_Network.hidden_layer_1[j];
+      if(speculative_Backpropagation == 'Y'){
+        speculative_Label_Array[label].hidden_weights_2_grad[j][i] = learning_rate*H2_error[i]*N_Network.hidden_layer_1[j]; //Saves H2 Weights for Speculation
+      }
     }
   }
   //Adjusts the Input-Hidden_1 Weights and Bias
   for (int i = 0; i<n_hidden_1;i++){
     N_Network.hidden_layer_1_bias[i] += H1_error[i]*learning_rate;
+    if(speculative_Backpropagation == 'Y'){
+      speculative_Label_Array[label].hidden_layer_1_bias_grad[i] = H1_error[i]*learning_rate; //Saves H2 Bias for Speculation
+    }
     for (int j = 0; j<n_inputs;j++){
       N_Network.hidden_weights_1[j][i] += learning_rate*H1_error[i]*N_Network.input_layer[j];
+      if(speculative_Backpropagation == 'Y'){
+        speculative_Label_Array[label].hidden_weights_1_grad[j][i] = learning_rate*H1_error[i]*N_Network.input_layer[j]; //Saves H2 Weights for Speculation
+        set_Grad[label] = 1; //A little redudant, will fix later
+      }
     }
   }
 
+}
+
+void s_backpropagation(int label){
+  //Adjust Output Weights and Bias
+  for (int i = 0; i<n_outputs;i++){
+    N_Network.output_layer_bias[i] += speculative_Label_Array[label].output_layer_bias_grad[i];
+    for (int j = 0; j<n_hidden_2;j++){
+      N_Network.output_weights[j][i] += speculative_Label_Array[label].output_weights_grad[j][i];
+    }
+  }
+
+  //Adjusts the Hidden_1-Hidden_2 Weights and Bias
+  for (int i = 0; i<n_hidden_2;i++){
+    N_Network.hidden_layer_2_bias[i] += speculative_Label_Array[label].hidden_layer_2_bias_grad[i];
+    for (int j = 0; j<n_hidden_1;j++){
+      N_Network.hidden_weights_2[j][i] += speculative_Label_Array[label].hidden_weights_2_grad[j][i];
+    }
+  }
+
+  //Adjusts the Input-Hidden_1 Weights and Bias
+  for (int i = 0; i<n_hidden_1;i++){
+    N_Network.hidden_layer_1_bias[i] += speculative_Label_Array[label].hidden_layer_1_bias_grad[i];
+    for (int j = 0; j<n_inputs;j++){
+      N_Network.hidden_weights_1[j][i] += speculative_Label_Array[label].hidden_weights_1_grad[j][i];
+    }
+  }
 }
 
 int get_Max(double arr[]){
@@ -364,9 +427,11 @@ int get_Max(double arr[]){
   return enume;
 }
 
-void train(double images[], unsigned char labels[], int im_Num,int epochs){
+void train(double images[], unsigned char labels[], int im_Num,int epochs){ 
+  time_t start2, end2;
   for(int f = 0; f<epochs; f++){
     printf("\nEpoch: %d\n",f);
+    start2 = clock();
     double desired[10];
     for(int i = 0; i < im_Num; i++){  
       //Perform Feed Forward
@@ -379,143 +444,90 @@ void train(double images[], unsigned char labels[], int im_Num,int epochs){
       if(activation_Type == 'R'){
         compute_Softmax_Output();
       }
-      if(labels[i] == 0){
-        desired[0] = 1;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
+      //Sets Desired for the Images
+      for(int g = 0; g < n_outputs;g++){
+        if(labels[i] == g){
+          desired[g] = 1;
+        }
+        else{
+          desired[g] = 0;
+        }
       }
-      else if(labels[i] == 1){
-        desired[0] = 0;
-        desired[1] = 1;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 2){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 1;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 3){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 1;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 4){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 1;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 5){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 1;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 6){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 1;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 7){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 1;
-        desired[8] = 0;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 8){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 1;
-        desired[9] = 0;
-        backpropagation(desired);
-      }
-      else if(labels[i] == 9){
-        desired[0] = 0;
-        desired[1] = 0;
-        desired[2] = 0;
-        desired[3] = 0;
-        desired[4] = 0;
-        desired[5] = 0;
-        desired[6] = 0;
-        desired[7] = 0;
-        desired[8] = 0;
-        desired[9] = 1;
-        backpropagation(desired);
-      }
-      else{
-        printf("Out of Bounds Input");
-      }
+      backpropagation(desired,labels[i]);
     }
+    end2 = clock();
+    printf("\nElapsed Time: %f seconds\n",(double)(end2-start2)/CLOCKS_PER_SEC);
   }
+  end2 = clock();
 }
 
+void s_train(double images[], unsigned char labels[], int im_Num,int epochs){ 
+  time_t start2, end2;
+
+
+  for(int f = 0; f<epochs; f++){
+    printf("\nEpoch: %d\n",f);
+    start2 = clock();
+    double desired[10];
+    double cur_Output_Diff = 0.0;
+    for(int i = 0; i < im_Num; i++){  
+      for(int j = 0; j < 28*28;j++){
+        N_Network.input_layer[j] = images[j+i*28*28];
+      }
+      feed_Forward();
+      compute_Softmax_Output();
+      //Sets Desired for the Images
+      for(int g = 0; g < n_outputs;g++){
+        if(labels[i] == g){
+          desired[g] = 1;
+        }
+        else{
+          desired[g] = 0;
+        }
+      }
+      if(set_Grad[labels[i]] == 1){
+        cur_Output_Diff = 0;
+        for(int h = 0; h < n_outputs; h++){
+          cur_Output_Diff += fabs(speculative_Label_Array[(int)labels[i]].softmax_Outputs[h] - N_Network.output_layer[h]);    //This Calculates the total error by comparing the saved softmax output and the new output
+        }
+
+
+
+        /*
+        end2 = clock();
+        if(end2-start2>1000){
+          printf("%.8f\n",cur_Output_Diff); // <--------------------- Trouble Shooting
+          printf("%.8f\n",speculative_Label_Array[(int)labels[i]].softmax_Outputs[0]);
+          printf("%.8f\n",N_Network.output_layer[0]);
+          start2 = clock();
+        }
+        */
+
+
+
+        if(cur_Output_Diff <= threshold){
+          s_backpropagation((int)labels[i]);
+        }
+        else{
+          for(int h = 0;h<n_outputs;h++){
+              speculative_Label_Array[(int)labels[i]].softmax_Outputs[h] = N_Network.output_layer[h];
+          }
+          backpropagation(desired,(int)labels[i]);
+        }
+      }
+      else
+      {
+        for(int h = 0;h<n_outputs;h++){
+            speculative_Label_Array[(int)labels[i]].softmax_Outputs[h] = N_Network.output_layer[h];
+        }
+        backpropagation(desired,(int)labels[i]);
+      }
+    }
+    end2 = clock();
+    printf("\nElapsed Time: %f seconds\n",(double)(end2-start2)/CLOCKS_PER_SEC);
+  }
+}
+ 
 void test(double images[], unsigned char labels[]){
   int max_Pos = 0;
   double count = 0;
@@ -566,7 +578,12 @@ int main()
     int epochs = 9;
     time_t start, end;
     start = clock();
-    train(training_Images,training_Labels,60000,epochs);
+    if(speculative_Backpropagation == 'N'){
+      train(training_Images,training_Labels,60000,epochs);
+    }
+    else if(speculative_Backpropagation == 'Y'){
+      s_train(training_Images,training_Labels,60000,epochs);
+    }
     end = clock();
     test(testing_Images,testing_Labels);
     printf("\nEpochs: %d\n",epochs);
