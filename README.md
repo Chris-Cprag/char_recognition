@@ -5,4 +5,4 @@ Time is measured using the Time.h library in C, taking the time after training a
 The Rate of Correctness is measured by taking the counted number of correct identifications and dividing it by the total number of testing data
 
 Other Information -------------------------------
-...
+Most Recent Update to the code is: Neural_Network_Rev5_Batches
